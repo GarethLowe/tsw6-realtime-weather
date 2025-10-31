@@ -4,6 +4,7 @@ using System.Linq;
 using GameFinder.RegistryUtils;
 using GameFinder.StoreHandlers.Steam;
 using GameFinder.StoreHandlers.Steam.Models.ValueTypes;
+using System.Runtime.InteropServices;
 using NMFS = NexusMods.Paths.FileSystem;
 
 namespace Tsw6RealtimeWeather.Apis.Tsw6;
@@ -17,20 +18,40 @@ public class Tsw6ApiKey
 
     private static bool cachedApiKey = false;
 
+    private static string commonFileSpec = Path.Join("My Games",
+            "TrainSimWorld6",
+            "Saved",
+            "Config",
+            tsw6ApiKeyFileName);
+
     public static string Get()
     {
+
+        bool isLinux = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
+        bool isWindows = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+
         if (cachedApiKey)
         {
             return apiKey;
         }
 
-        apiKey = TryToGetApiKeyFromDocuments();
+        if (isWindows)
+        {
+            apiKey = TryToGetApiKeyFromDocuments();
 
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                apiKey = TryToGetApiKeyFromSteam();
+            }
+        }
+        if (isLinux)
+        {
+            apiKey = TryToGetApiKeyFromLinuxSteam();
+        }
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            apiKey = TryToGetApiKeyFromSteam();
+            Logger.LogError("CommAPIKey.txt NOT FOUND.");
         }
-
         cachedApiKey = true;
         return apiKey;
     }
@@ -38,13 +59,10 @@ public class Tsw6ApiKey
     private static string TryToGetApiKeyFromDocuments()
     {
         var searchPathForNonDevelopmentMode = Path.Join(
-        Environment.GetFolderPath(
-            Environment.SpecialFolder.MyDocuments),
-            "My Games",
-            "TrainSimWorld6",
-            "Saved",
-            "Config",
-            tsw6ApiKeyFileName);
+            Environment.GetFolderPath(
+                Environment.SpecialFolder.MyDocuments),
+            commonFileSpec);
+
 
         if (File.Exists(searchPathForNonDevelopmentMode))
         {
@@ -93,4 +111,45 @@ public class Tsw6ApiKey
 
         return File.ReadAllText(searchPathForDevelopmentMode);
     }
+
+
+    private static string TryToGetApiKeyFromLinuxSteam()
+    {
+        var fs = NMFS.Shared;
+        var steamHandler = new SteamHandler(fs, OperatingSystem.IsWindows() ? WindowsRegistry.Shared : null);
+        var tsw6DeveloperAppId = AppId.From(tsw6AppId);
+        var tsw6Game = steamHandler.FindOneGameById(tsw6DeveloperAppId, out var errors);
+        if (tsw6Game == null)
+        {
+            Logger.LogError("Error: TSW6 is null.");
+            return string.Empty;
+        }
+
+        ProtonWinePrefix? protonPrefix = tsw6Game.GetProtonPrefix();
+        if (protonPrefix == null)
+        {
+            Logger.LogError("Error: protonPrefix is null.");
+            return string.Empty;
+        }
+        var protonPrefixDirectory = protonPrefix.ProtonDirectory;
+        if (!fs.DirectoryExists(protonPrefixDirectory))
+        {
+            Logger.LogError("Error: protonPrefix does not exist.");
+            return string.Empty;
+        }
+            var LinuxNativeKeyLocation = Path.Join(protonPrefixDirectory.ToString(),
+                    "pfx",
+                    "drive_c",
+                    "users",
+                    "steamuser",
+                    "Documents",
+                    commonFileSpec);
+            Logger.LogInfo($"Searching for key in:{LinuxNativeKeyLocation}");
+            if (File.Exists(LinuxNativeKeyLocation))
+            {
+                return File.ReadAllText(LinuxNativeKeyLocation);
+            }
+
+            return string.Empty;
+        }
 }
