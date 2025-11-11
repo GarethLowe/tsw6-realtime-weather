@@ -1,10 +1,9 @@
 using System;
 using System.IO;
-using System.Linq;
 using GameFinder.RegistryUtils;
 using GameFinder.StoreHandlers.Steam;
 using GameFinder.StoreHandlers.Steam.Models.ValueTypes;
-using NMFS = NexusMods.Paths.FileSystem;
+using System.Runtime.InteropServices;
 
 namespace Tsw6RealtimeWeather.Apis.Tsw6;
 
@@ -15,52 +14,21 @@ public class Tsw6ApiKey
 
     private static string apiKey = string.Empty;
 
-    private static bool cachedApiKey = false;
-
     public static string Get()
     {
-        if (cachedApiKey)
+        if (string.IsNullOrEmpty(apiKey))
         {
-            return apiKey;
+            apiKey = RetrieveKey();
         }
-
-        apiKey = TryToGetApiKeyFromDocuments();
-
-        if (string.IsNullOrWhiteSpace(apiKey))
-        {
-            apiKey = TryToGetApiKeyFromSteam();
-        }
-
-        cachedApiKey = true;
         return apiKey;
     }
+  
+  private static string RetrieveKey()
+  {
 
-    private static string TryToGetApiKeyFromDocuments()
-    {
-        var searchPathForNonDevelopmentMode = Path.Join(
-        Environment.GetFolderPath(
-            Environment.SpecialFolder.MyDocuments),
-            "My Games",
-            "TrainSimWorld6",
-            "Saved",
-            "Config",
-            tsw6ApiKeyFileName);
-
-        if (File.Exists(searchPathForNonDevelopmentMode))
-        {
-            return File.ReadAllText(searchPathForNonDevelopmentMode);
-        }
-
-        return string.Empty;
-
-    }
-
-    private static string TryToGetApiKeyFromSteam()
-    {
         // Search for the Steam title instead as we are in game mode.
-        var steamHandler = new SteamHandler(NMFS.Shared, OperatingSystem.IsWindows() ? WindowsRegistry.Shared : null);
-        var tsw6DeveloperAppId = AppId.From(tsw6AppId);
-        var tsw6Game = steamHandler.FindOneGameById(tsw6DeveloperAppId, out var errors);
+        var steamHandler = new SteamHandler(NexusMods.Paths.FileSystem.Shared, OperatingSystem.IsWindows() ? WindowsRegistry.Shared : null);
+        var tsw6Game = steamHandler.FindOneGameById(AppId.From(tsw6AppId), out var errors);
 
         if (errors.Length > 0)
         {
@@ -74,23 +42,73 @@ public class Tsw6ApiKey
 
         if (tsw6Game == null)
         {
-            Logger.LogError("Error: TSW6 is null.");
+            Logger.LogError("Error: TSW6 install cannot be found");
             return string.Empty;
         }
 
-        var searchPathForDevelopmentMode = Path.Join(
-            tsw6Game.Path.ToString(),
-            "WindowsNoEditor",
-            "TS2Prototype",
-            "Saved",
-            "Config",
-            tsw6ApiKeyFileName);
+        // Game path is not platform specific to us.
+        var gamePath = Path.Join(tsw6Game.Path.ToString(),
+                                    "WindowsNoEditor",
+                                    "TS2Prototype",
+                                    "Saved",
+                                    "Config",
+                                    tsw6ApiKeyFileName);
 
-        if (!File.Exists(searchPathForDevelopmentMode))
+        // Need to find documents folder based on platform.
+        var docPath = string.Empty;
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
-            return string.Empty;
+            ProtonWinePrefix? protonPrefix = tsw6Game.GetProtonPrefix();
+            if (protonPrefix == null)
+            {
+                Logger.LogError("Error: Proton Prefix is not set.");
+                return string.Empty;
+            }
+
+            if (!NexusMods.Paths.FileSystem.Shared.DirectoryExists(protonPrefix.ProtonDirectory))
+            {
+                Logger.LogError("Error: Proton Prefix is set but does not exist.");
+                return string.Empty;
+            }
+            docPath = Path.Join(protonPrefix.ProtonDirectory.ToString(),
+                                    "pfx",
+                                    "drive_c",
+                                    "users",
+                                    "steamuser",
+                                    "Documents");
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            docPath = Environment.GetFolderPath(
+                        Environment.SpecialFolder.MyDocuments);
+        }
+        else
+        {
+            Logger.LogWarning("Warning: Unsupported Platform, unable to find user documents.");
         }
 
-        return File.ReadAllText(searchPathForDevelopmentMode);
+        // from player documents folder
+        docPath = Path.Join(docPath,
+                            "My Games",
+                            "TrainSimWorld6",
+                            "Saved",
+                            "Config",
+                            tsw6ApiKeyFileName);
+
+        if (File.Exists(docPath))
+        {
+            return File.ReadAllText(docPath);
+        }
+        else if (File.Exists(gamePath))
+        {
+            return File.ReadAllText(gamePath);
+        }
+        else
+        {
+            Logger.LogError("Error: Unable to find TSW 6 API key");
+            return string.Empty;
+        }
     }
 }
+
