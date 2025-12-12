@@ -43,10 +43,13 @@ public static class WeatherConverter
 
         // Wetness: weighted combination of precipitation (80%) and humidity (20%)
         double humidityFactor = openWeather.Main?.Humidity / 100.0 ?? 0;
+
+        // rail adhesion seems to get nasty after about 10% dampness, so clamp WAY down
+        // up to 15% seems doable
         tsw6Weather.Wetness = Math.Clamp(
-            (tsw6Weather.Precipitation * 0.8) + (humidityFactor * 0.2),
+            (tsw6Weather.Precipitation * 0.125) + (humidityFactor * 0.075),
             0, 
-            1
+            0.15
         );
 
         // Ground snow only appears during active snowfall (weather ID 6xx range)

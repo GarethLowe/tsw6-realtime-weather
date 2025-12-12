@@ -365,7 +365,7 @@ public class ConsoleUI
         );
 
         // Wetness (0-1 scale)
-        var wetnessPercentage = gameWeather.Wetness * 100.0;
+        var wetnessPercentage = gameWeather.Wetness * (100.0 / 0.15); // hide the scaling clamp from the user
         grid.AddRow(
             new Markup("[bold]Wetness:[/]"),
             new Markup($"[aqua]{wetnessPercentage:F0}%[/]")
